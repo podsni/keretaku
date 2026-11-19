@@ -1,0 +1,6 @@
+{
+  "name": "Sepur Live",
+  "description": "Peta langsung kereta api Indonesia di Pulau Jawa — KRL, MRT, LRT, KA Bandara, Whoosh, KA Antarkota, KA Barang, perencana rute, dan peta 4.700+ perlintasan sebidang (JPL).",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
