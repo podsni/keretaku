@@ -65,6 +65,47 @@ export interface SearchResults {
   jpls: { index: number; title: string; road: string; daop: string; cat: string }[];
 }
 
+const STATION_ALIASES: Record<string, string[]> = {
+  YK: ['jogja', 'yogya', 'tugu', 'stasiun tugu', 'malioboro', 'djogja'],
+  LPN: ['lempuyangan', 'jogja'],
+  YIA: ['yia', 'bandara jogja', 'kulon progo', 'kulonprogo'],
+  SLO: ['solo', 'balapan', 'surakarta', 'tirtonadi'],
+  PWS: ['purwosari', 'solo'],
+  SMO: ['bandara solo', 'adi soemarmo', 'adisoemarmo', 'bias'],
+  SBI: ['pasarturi', 'pasar turi', 'surabaya utara'],
+  SGU: ['gubeng', 'surabaya gubeng', 'sby'],
+  SB: ['surabaya kota', 'semut', 'stasiun semut'],
+  GMR: ['gambir', 'monas', 'jakarta pusat'],
+  PSE: ['senen', 'pasar senen'],
+  JAKK: ['kota', 'jakarta kota', 'beos', 'kota tua'],
+  MRI: ['manggarai', 'hub manggarai'],
+  SUD: ['dukuh atas', 'sudirman', 'kendal'],
+  SUDB: ['dukuh atas', 'sudirman baru', 'bni city'],
+  BNI: ['bni city', 'dukuh atas', 'ka bandara'],
+  BST: ['soetta', 'cgk', 'soekarno hatta', 'bandara soetta', 'bandara jakarta'],
+  THB: ['tanah abang', 'tanahabang'],
+  HLM: ['halim', 'whoosh halim', 'kcic halim'],
+  PDL: ['padalarang', 'whoosh padalarang', 'feeder bandung'],
+  TGLR: ['tegalluar', 'whoosh bandung', 'summarecon'],
+  BD: ['bandung', 'hall', 'stasiun hall'],
+  KAC: ['kiaracondong', 'kircon'],
+  SMT: ['tawang', 'semarang tawang', 'kota lama'],
+  SMC: ['poncol', 'semarang poncol'],
+  ML: ['malang', 'kotabaru', 'malang kotabaru'],
+  CN: ['cirebon', 'kejaksan'],
+  CNP: ['prujakan', 'cirebon prujakan'],
+};
+
+const LINE_ALIASES: { tokens: string[]; match: (l: Line) => boolean }[] = [
+  { tokens: ['whoosh', 'kcic', 'kereta cepat'], match: (l) => l.sys === 'whoosh' },
+  { tokens: ['bias', 'adi soemarmo'], match: (l) => /bias|soemarmo/i.test(l.name) },
+  { tokens: ['yia', 'bandara jogja'], match: (l) => /yia/i.test(l.name) },
+  { tokens: ['soetta', 'cgk', 'basoetta'], match: (l) => l.sys === 'bandara' && /soekarno|soetta|basoetta|bandara/i.test(l.name) },
+  { tokens: ['prameks'], match: (l) => /prameks/i.test(l.name) },
+  { tokens: ['panoramic'], match: (l) => /\b(argo wilis|turangga|parahyangan|papandayan|pangandaran)\b/i.test(l.name) },
+  { tokens: ['suite', 'compartment', 'luxury'], match: (l) => /\b(bima|argo semeru|argo bromo anggrek)\b/i.test(l.name) },
+];
+
 /** Fast, ranked client-side search across stations, lines, active trains, and JPL crossings. */
 export function unifiedSearch(
   query: string,
@@ -80,9 +121,12 @@ export function unifiedSearch(
     const nm = s.name.toLowerCase();
     const id = s.id.toLowerCase();
     const code = (s.code || '').toLowerCase();
+    const aliases = STATION_ALIASES[s.id] || [];
     let score = 0;
     if (id === q || code === q || nm === q) score = 100;
+    else if (aliases.some((a) => a === q)) score = 95;
     else if (nm.startsWith(q) || id.startsWith(q)) score = 70;
+    else if (aliases.some((a) => a.startsWith(q) || a.includes(q))) score = 65;
     else if (nm.includes(q)) score = 40;
     if (score > 0) {
       if ((s.lines?.length ?? 0) > 2) score += 10;
@@ -90,6 +134,15 @@ export function unifiedSearch(
     }
   }
   scoredStations.sort((a, b) => b.score - a.score || a.s.name.localeCompare(b.s.name));
+
+  const matchedAliasLines = new Set<string>();
+  for (const rule of LINE_ALIASES) {
+    if (rule.tokens.some((tok) => tok === q || tok.includes(q) || q.includes(tok))) {
+      for (const l of engine.allLines()) {
+        if (rule.match(l)) matchedAliasLines.add(l.id);
+      }
+    }
+  }
 
   const scoredLines: { l: Line; score: number }[] = [];
   for (const l of engine.allLines()) {
@@ -99,6 +152,7 @@ export function unifiedSearch(
     let score = 0;
     if (nm === q || svc === q || sh === q) score = 100;
     else if (nm.startsWith(q) || svc.startsWith(q)) score = 70;
+    else if (matchedAliasLines.has(l.id)) score = 68;
     else if (nm.includes(q) || svc.includes(q)) score = 40;
     if (score > 0) scoredLines.push({ l, score });
   }

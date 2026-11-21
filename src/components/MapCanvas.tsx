@@ -23,6 +23,7 @@ import {
   computeConsist3DPoses,
 } from '../engine/eta';
 import { createTrain3DLayer } from '../engine/train3dLayer';
+import { getSpecialServiceMeta } from '../engine/javaInsights';
 import type {
   ClockState,
   DetailState,
@@ -990,6 +991,7 @@ export function MapCanvas({
         createTrain3DLayer(
           () => poses3DRef.current,
           () => (stateRef.current.basemap === 'dark' ? 'dark' : 'light'),
+          () => stateRef.current.getClock().sec,
         ),
       );
     }
@@ -1468,6 +1470,7 @@ export function MapCanvas({
         if (use3DTrains && (isSel || (!dim && poses3D.length < 10))) {
           const trail3D = E.trail(r.trip, r.s, sp.len + (isSel ? 90 : 12));
           const cars3D = computeConsist3DPoses(trail3D, k, br);
+          const spMeta = getSpecialServiceMeta(line);
           poses3D.push({
             id: r.trip.id,
             date: r.trip.date,
@@ -1475,6 +1478,7 @@ export function MapCanvas({
             stockKey: k,
             lineColor: line.color,
             selected: isSel,
+            specialCar: spMeta?.specialCar ?? null,
             headLngLat: r.s.p,
             bearingDeg: br,
             speedKmh: mv ? clampSpeedKmh(r.s.v ?? 0, line) : 0,

@@ -51,7 +51,27 @@ import {
   formatRealCountdown,
 } from './eta';
 import { STOCK, stockKey } from './stock';
-import type { FreightData, JplData, KaiData, NetworkData, TripsData } from './types';
+import {
+  buildMareyDiagram,
+  computeNearbyJplAlerts,
+  detectTripMeetsAndOvertakes,
+  estimateJourneyFare,
+  formatStationKm,
+  getDaylightLighting,
+  getHubInterchangeInfo,
+  getSpecialServiceMeta,
+  getStationAccessibility,
+  isDepartureWheelchairFriendly,
+  tagJourneyHighlights,
+} from './javaInsights';
+import {
+  buildTravelWeatherTip,
+  buildWeatherApiUrl,
+  describeWmoWeather,
+  formatWindCompass,
+  parseOpenMeteoResponse,
+} from './weather';
+import type { FreightData, JplData, KaiData, NetworkData, StationsExtraData, TripsData } from './types';
 
 function loadJson<T>(file: string): T {
   const full = path.resolve(process.cwd(), 'public/data', file);
@@ -427,6 +447,209 @@ test('nearby live trains radar, approaching vector detection, nearest stations, 
     assert.ok('esri-labels' in hybStyle.sources);
   }
 });
+
+test('Java insights: wheelchair accessibility filter, Marey GAPEKA, meets/overtakes, JPL alerts, 3D daylight, Panoramic/Suite Class, and Indonesian aliases', () => {
+  const net = loadJson<NetworkData>('network.json');
+  const trips = loadJson<TripsData>('trips.json');
+  const kai = loadJson<KaiData>('kai.json');
+  const freight = loadJson<FreightData>('freight.json');
+  const jpl = loadJson<JplData>('jpl.json');
+
+  const engine = new Engine(net, trips, kai);
+  engine.addFreight(freight);
+  engine.freightOn = () => true;
+
+  const clk = { date: '2026-10-12', dow: 1, sec: 8 * 3600 };
+  const running = engine.running(clk);
+
+  // 1. Station & departure wheelchair accessibility
+  const mri = engine.st.get('MRI')!;
+  const mriLines = (mri.lines || []).map((id) => engine.lines.get(id)!).filter(Boolean);
+  const mriAcc = getStationAccessibility(mri, mriLines);
+  assert.equal(mriAcc.tier, 'full');
+  assert.equal(mriAcc.wheelchairAvailable, true);
+  assert.ok(mriAcc.features.some((f) => f.id === 'lift' && f.available));
+
+  // Regression: deep-linking to YK before linesServing hydrates must still classify YK as full accessible
+  const yk = engine.st.get('YK')!;
+  const ykAcc = getStationAccessibility(yk, []);
+  assert.equal(ykAcc.tier, 'full');
+  assert.equal(ykAcc.wheelchairAvailable, true);
+
+  const whooshTrip = engine.day('2026-10-12').trips.find((t) => t.line === 'kcic');
+  if (whooshTrip) {
+    const wAcc = isDepartureWheelchairFriendly(whooshTrip, engine.lines.get('kcic'));
+    assert.equal(wAcc.accessible, true);
+    assert.equal(wAcc.level, 'level_boarding');
+  }
+  const freightTrip = engine.day('2026-10-12').trips.find((t) => t.freight);
+  if (freightTrip) {
+    const fAcc = isDepartureWheelchairFriendly(freightTrip, engine.lines.get(freightTrip.line));
+    assert.equal(fAcc.accessible, false);
+    assert.equal(fAcc.level, 'none');
+  }
+
+  // 2. Intermodal hub cards
+  const mriHub = getHubInterchangeInfo('MRI', engine);
+  assert.ok(mriHub && mriHub.modes.length >= 3);
+  const pdlHub = getHubInterchangeInfo('PDL', engine);
+  assert.ok(pdlHub && pdlHub.hubTitle.includes('Whoosh'));
+
+  // 3. Panoramic & Suite Class metadata + consist cars
+  const argoWilis = [...engine.lines.values()].find((l) => /argo wilis/i.test(l.name));
+  assert.ok(argoWilis, 'Expected Argo Wilis in KAI dataset');
+  const wilisMeta = getSpecialServiceMeta(argoWilis);
+  assert.equal(wilisMeta?.specialCar, 'panoramic');
+  const wilisConsist = buildConsistSummary(argoWilis!);
+  assert.equal(wilisConsist.cars[wilisConsist.cars.length - 1].code, 'PAN');
+
+  const bima = [...engine.lines.values()].find((l) => /\bbima\b/i.test(l.name));
+  assert.ok(bima, 'Expected Bima in KAI dataset');
+  const bimaMeta = getSpecialServiceMeta(bima);
+  assert.equal(bimaMeta?.specialCar, 'suite');
+  const bimaConsist = buildConsistSummary(bima!);
+  assert.equal(bimaConsist.cars[bimaConsist.cars.length - 1].code, 'SCC');
+
+  // 4. Marey GAPEKA diagram
+  const marey = buildMareyDiagram(engine, 'krl-b', '2026-10-12', 60);
+  assert.ok(marey !== null);
+  assert.ok(marey.stations.length >= 10);
+  assert.ok(marey.series.length >= 20);
+  assert.ok(marey.maxSec > marey.minSec);
+
+  // 5. Scheduled meets & overtakes detection
+  const sampleIntercity = engine
+    .day('2026-10-12')
+    .trips.find((t) => !t.freight && t.sids.length >= 15);
+  assert.ok(sampleIntercity);
+  const interactions = detectTripMeetsAndOvertakes(engine, sampleIntercity!, 10);
+  assert.ok(Array.isArray(interactions));
+  assert.ok(interactions.length >= 1, 'Expected at least 1 scheduled meet/overtake on long Java trip');
+
+  // 6. Nearby JPL live alert radar near Manggarai
+  const jplAlerts = computeNearbyJplAlerts(engine, jpl, [106.8502, -6.2099], clk, {
+    limit: 3,
+    maxRadiusMeters: 15_000,
+  });
+  assert.ok(jplAlerts.length >= 1);
+  assert.ok(jplAlerts.every((a) => a.item.cat !== 'fly' && a.item.cat !== 'under'));
+
+  // 7. 3D Time-of-day atmospheric lighting
+  const noonLight = getDaylightLighting(12 * 3600);
+  assert.equal(noonLight.phase, 'day');
+  assert.equal(noonLight.headlightBeamOpacity, 0);
+  assert.equal(noonLight.windowGlow, 0);
+
+  const duskLight = getDaylightLighting(18 * 3600);
+  assert.equal(duskLight.phase, 'dusk');
+  assert.ok(duskLight.headlightBeamOpacity > 0.2);
+
+  const nightLight = getDaylightLighting(21 * 3600 + 30 * 60);
+  assert.equal(nightLight.phase, 'night');
+  assert.ok(nightLight.headlightBeamOpacity > 0.5);
+  assert.ok(nightLight.windowGlow > 0.8);
+
+  // 8. Indonesian alias search (Jogja, Tugu, YIA, Soetta, Pasarturi)
+  const jogjaRes = unifiedSearch('jogja', engine, running, jpl);
+  assert.ok(jogjaRes.stations.some((s) => s.id === 'YK'), 'Search "jogja" should find YK');
+  const yiaRes = unifiedSearch('yia', engine, running, jpl);
+  assert.ok(yiaRes.stations.some((s) => s.id === 'YIA'), 'Search "yia" should find YIA');
+  const soettaRes = unifiedSearch('soetta', engine, running, jpl);
+  assert.ok(soettaRes.stations.some((s) => s.id === 'BST'), 'Search "soetta" should find BST');
+  const ptRes = unifiedSearch('pasarturi', engine, running, jpl);
+  assert.ok(ptRes.stations.some((s) => s.id === 'SBI'), 'Search "pasarturi" should find SBI');
+
+  // 9. Journey fare estimation & highlights
+  const journeys = engine.plan('BOO', 'THB', '2026-10-12', 7 * 3600 + 30 * 60, 4);
+  assert.ok(journeys.length >= 1);
+  const est0 = estimateJourneyFare(engine, journeys[0]);
+  assert.ok(est0.minIdr > 0 && est0.fareText.startsWith('Rp'));
+  const tagged = tagJourneyHighlights(engine, journeys);
+  assert.ok(tagged.some((t) => t.badges.includes('Tercepat')));
+
+  // 10. formatStationKm safely formats every entry in stations_x.json (including nested tuple arrays like YK)
+  const sx = loadJson<StationsExtraData>('stations_x.json');
+  assert.equal(formatStationKm(sx.s.YK?.km), '167+081');
+  for (const entry of Object.values(sx.s)) {
+    const res = formatStationKm(entry.km);
+    assert.ok(res === null || (typeof res === 'string' && res.length <= 16));
+  }
+});
+
+test('real-time station weather URL, WMO Indonesian mapping, compass, parser, and travel tips work cleanly', () => {
+  const url = buildWeatherApiUrl(-7.7892, 110.3635);
+  assert.ok(url.startsWith('https://api.open-meteo.com/v1/forecast?'));
+  assert.ok(url.includes('latitude=-7.7892'));
+  assert.ok(url.includes('longitude=110.3635'));
+  assert.ok(url.includes('timezone=Asia%2FJakarta'));
+
+  assert.equal(describeWmoWeather(0, true).label, 'Cerah');
+  assert.equal(describeWmoWeather(0, false).icon, 'moon');
+  assert.equal(describeWmoWeather(61, true).tone, 'rain');
+  assert.equal(describeWmoWeather(95, true).tone, 'storm');
+
+  assert.equal(formatWindCompass(0), 'Utara');
+  assert.equal(formatWindCompass(90), 'Timur');
+  assert.equal(formatWindCompass(225), 'Barat Daya');
+
+  const parsed = parseOpenMeteoResponse(
+    {
+      current: {
+        time: '2026-11-20T14:15',
+        temperature_2m: 29.4,
+        apparent_temperature: 33.2,
+        relative_humidity_2m: 78,
+        is_day: 1,
+        precipitation: 0.6,
+        weather_code: 61,
+        cloud_cover: 82,
+        wind_speed_10m: 14.3,
+        wind_direction_10m: 185,
+      },
+      hourly: {
+        time: [
+          '2026-11-20T14:00',
+          '2026-11-20T15:00',
+          '2026-11-20T16:00',
+          '2026-11-20T17:00',
+        ],
+        temperature_2m: [29.4, 28.6, 27.9, 27.1],
+        precipitation_probability: [60, 75, 50, 30],
+        weather_code: [61, 63, 2, 2],
+      },
+    },
+    1700000000000,
+  );
+
+  assert.equal(parsed.tempC, 29);
+  assert.equal(parsed.apparentTempC, 33);
+  assert.equal(parsed.humidityPct, 78);
+  assert.equal(parsed.windSpeedKmh, 14);
+  assert.equal(parsed.windCompass, 'Selatan');
+  assert.equal(parsed.precipitationMm, 0.6);
+  assert.equal(parsed.label, 'Hujan Ringan');
+  assert.equal(parsed.tone, 'rain');
+  assert.equal(parsed.observedTime, '14.15');
+  assert.equal(parsed.hourly.length, 3);
+  assert.equal(parsed.hourly[0].hourLabel, '15.00');
+  assert.equal(parsed.hourly[0].precipProb, 75);
+  assert.ok(parsed.travelTip.toLowerCase().includes('payung'));
+
+  const hotTip = buildTravelWeatherTip({
+    tone: 'clear',
+    precipitationMm: 0,
+    apparentTempC: 36,
+    windSpeedKmh: 10,
+    hourly: [],
+    isDay: true,
+  });
+  assert.ok(hotTip.toLowerCase().includes('terik'));
+
+  assert.throws(() => parseOpenMeteoResponse(null));
+  assert.throws(() => parseOpenMeteoResponse({}));
+});
+
+
 
 
 

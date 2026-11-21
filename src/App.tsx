@@ -1741,6 +1741,7 @@ export default function App() {
               }}
               onOpenStation={openStation}
               onOpenLine={openLine}
+              onOpenTrain={openTrain}
             />
           ) : detail?.type === 'station' ? (
             <StationDetailPanel
@@ -1757,6 +1758,7 @@ export default function App() {
               onToggleFavorite={handleToggleFavorite}
               onOpenTrain={openTrain}
               onOpenLine={openLine}
+              onOpenStation={openStation}
               onPlanFrom={(sid) => {
                 setRouteFrom(sid);
                 setDetail(null);
@@ -1816,9 +1818,16 @@ export default function App() {
               recentStations={recentStations}
               kaiLoaded={kaiLoaded}
               freightLoaded={freightLoaded}
+              jplData={jplData}
+              jplLoading={jplLoading}
               onSelectFilter={setSystemFilter}
               onSelectBasemap={handleSelectBasemap}
               onLocateMe={handleLocateMe}
+              onEnableJpl={() => {
+                setLayers((prev) => ({ ...prev, jpl: true }));
+                void ensureJplLoaded();
+              }}
+              onOpenJpl={openJpl}
               onOpenTrain={openTrain}
               onOpenTrain3D={openTrain3D}
               onOpenStation={openStation}

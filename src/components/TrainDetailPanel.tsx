@@ -1,12 +1,15 @@
 import { memo, useMemo, useState } from 'react';
 import {
   ArrowLeft,
+  ArrowLeftRight,
   Box,
   Clock,
   Crosshair,
   FastForward,
   Navigation,
   Radio,
+  Sparkles,
+  Sun,
   TrainFront,
 } from 'lucide-react';
 import type { Engine } from '../engine/sched';
@@ -31,6 +34,11 @@ import {
   formatScheduleDelta,
   snapGpsToTrip,
 } from '../engine/gps';
+import {
+  detectTripMeetsAndOvertakes,
+  getDaylightLighting,
+  getSpecialServiceMeta,
+} from '../engine/javaInsights';
 import type { ClockState, FleetMap } from '../engine/types';
 import { ShareButton } from './ShareButton';
 
@@ -55,6 +63,7 @@ interface TrainDetailPanelProps {
   onFastForward: () => void;
   onOpenStation: (id: string) => void;
   onOpenLine: (id: string) => void;
+  onOpenTrain?: (id: string, date: string) => void;
 }
 
 export const TrainDetailPanel = memo(function TrainDetailPanel({
@@ -78,6 +87,7 @@ export const TrainDetailPanel = memo(function TrainDetailPanel({
   onFastForward,
   onOpenStation,
   onOpenLine,
+  onOpenTrain,
 }: TrainDetailPanelProps) {
   const [showPassThrough, setShowPassThrough] = useState(false);
   const [selectedCarIdx, setSelectedCarIdx] = useState<number | null>(null);
@@ -113,6 +123,12 @@ export const TrainDetailPanel = memo(function TrainDetailPanel({
         : null,
     [engine, trip, t, state, simSpeed, simPaused, gpsMatch],
   );
+  const specialMeta = useMemo(() => getSpecialServiceMeta(line), [line]);
+  const interactions = useMemo(
+    () => (trip ? detectTripMeetsAndOvertakes(engine, trip, 6) : []),
+    [engine, trip],
+  );
+  const daylight = getDaylightLighting(clock.sec);
 
   if (!trip || !line) {
     return (
@@ -591,6 +607,117 @@ export const TrainDetailPanel = memo(function TrainDetailPanel({
                 Ketuk unit kereta untuk melihat rincian stamformasi tipikal layanan ini.
               </p>
             )}
+          </section>
+        )}
+
+        {/* Kelas Layanan, Fasilitas Spesial (Panoramic / Suite Class / SSNG) & Estimasi Tarif */}
+        {specialMeta && (
+          <section
+            data-testid="train-service-meta"
+            className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 p-3 flex flex-col gap-2"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900 dark:text-white">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{specialMeta.classLabel}</span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Estimasi tarif: <strong className="text-slate-800 dark:text-slate-200 font-semibold">{specialMeta.fareText}</strong>
+                </p>
+              </div>
+              {specialMeta.specialBadge && (
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 shrink-0">
+                  {specialMeta.specialBadge}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {specialMeta.highlights.map((hl) => (
+                <span
+                  key={hl}
+                  className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700 text-[10px] font-medium text-slate-700 dark:text-slate-200"
+                >
+                  {hl}
+                </span>
+              ))}
+              {threeD && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800/60 text-[10px] font-semibold text-blue-700 dark:text-blue-300">
+                  <Sun className="w-3 h-3" aria-hidden="true" />
+                  <span>Pencahayaan 3D: {daylight.label}</span>
+                </span>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* Scheduled Meets (Persilangan) & Overtakes (Penyusulan) */}
+        {interactions.length > 0 && (
+          <section
+            data-testid="train-meets-overtakes"
+            className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/70 p-3 flex flex-col gap-2"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                <ArrowLeftRight className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
+                <span>Persilangan &amp; Penyusulan</span>
+              </span>
+              <span className="font-mono tabular-nums text-[10px] text-slate-400">
+                {interactions.length} titik
+              </span>
+            </div>
+            <div className="divide-y divide-slate-100 dark:divide-slate-800/70">
+              {interactions.map((item, idx) => {
+                const otherInfo = trainDisplayInfo(item.otherTrip, item.otherLine);
+                const badgeText =
+                  item.kind === 'meet'
+                    ? 'Silang'
+                    : item.kind === 'overtaken'
+                      ? 'Disusul'
+                      : 'Menyusul';
+                const badgeCls =
+                  item.kind === 'meet'
+                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800/60'
+                    : item.kind === 'overtaken'
+                      ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
+                      : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60';
+                return (
+                  <div
+                    key={`${item.kind}-${item.otherTrip.id}-${item.stationId}-${idx}`}
+                    className="py-2 flex items-center justify-between gap-2"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`px-1.5 py-0.5 rounded border text-[10px] font-bold shrink-0 ${badgeCls}`}>
+                          {badgeText}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onOpenTrain
+                              ? onOpenTrain(item.otherTrip.id, item.otherTrip.date)
+                              : onOpenStation(item.stationId)
+                          }
+                          className="text-xs font-semibold text-slate-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 truncate text-left"
+                        >
+                          {otherInfo.name} ({otherInfo.num})
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onOpenStation(item.stationId)}
+                        className="text-[11px] text-slate-500 dark:text-slate-400 hover:underline mt-0.5 block truncate text-left"
+                      >
+                        di Stasiun {item.stationName}
+                      </button>
+                    </div>
+                    <span className="font-mono tabular-nums text-xs font-bold text-slate-800 dark:text-slate-200 shrink-0">
+                      {fmt(item.timeSec)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </section>
         )}
 

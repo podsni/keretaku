@@ -41,6 +41,7 @@ export interface Train3DPose {
   speedKmh: number;
   trailCoords: [number, number][];
   cars: Car3DPose[];
+  specialCar?: 'panoramic' | 'suite' | 'ssng' | null;
 }
 
 /** Format a countdown duration in seconds as crisp MM:SS or Hj MM:SS. */

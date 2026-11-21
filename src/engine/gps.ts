@@ -1,6 +1,7 @@
 import type { Engine } from './sched';
 import { haversine } from './sched';
 import { STOCK, stockKey } from './stock';
+import { getSpecialServiceMeta } from './javaInsights';
 import type { ClockState, Line, Trip } from './types';
 
 export interface LiveGpsFix {
@@ -83,12 +84,15 @@ const LIVERY_COLORS: Record<string, [string, string, string]> = {
 export function buildConsistSummary(line: Line): ConsistSummary {
   const key = stockKey(line);
   const spec = STOCK[key] || STOCK.ka;
+  const serviceMeta = getSpecialServiceMeta(line);
+  const specialCar = serviceMeta?.specialCar ?? null;
   let coachNum = 0;
 
   const cars: ConsistCarItem[] = spec.cars.map((car, idx) => {
-    const [bodyColor, stripePrimary, stripeSecondary] = LIVERY_COLORS[car.liv] || ['#E2E8F0', line.color, '#94A3B8'];
+    let [bodyColor, stripePrimary, stripeSecondary] = LIVERY_COLORS[car.liv] || ['#E2E8F0', line.color, '#94A3B8'];
     let code = String(idx + 1);
     let role = 'Kereta Penumpang';
+    const isLastCar = idx === spec.cars.length - 1;
 
     if (car.loco) {
       code = car.liv === 'cc201' ? 'CC201' : 'CC206';
@@ -96,6 +100,18 @@ export function buildConsistSummary(line: Line): ConsistSummary {
     } else if (car.liv === 'argoP' || car.liv === 'coachP') {
       code = 'P';
       role = 'Kereta Pembangkit (P)';
+    } else if ((car.liv === 'argo' || car.liv === 'coach') && isLastCar && specialCar === 'panoramic') {
+      code = 'PAN';
+      role = 'Kereta Panoramic (Atap Kaca Sunroof)';
+      bodyColor = '#E0F2FE';
+      stripePrimary = '#0284C7';
+      stripeSecondary = '#0F172A';
+    } else if ((car.liv === 'argo' || car.liv === 'coach') && isLastCar && specialCar === 'suite') {
+      code = 'SCC';
+      role = 'Suite Class Compartment (Kabin Privat)';
+      bodyColor = '#FEF3C7';
+      stripePrimary = '#B45309';
+      stripeSecondary = '#1E293B';
     } else if (car.liv === 'argo') {
       coachNum++;
       if (coachNum === 5) {

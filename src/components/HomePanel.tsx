@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowRight,
   Box,
   Compass,
@@ -30,9 +31,11 @@ import {
   findNearbyLiveTrains,
   findNearestStations,
 } from '../engine/nearby';
+import { computeNearbyJplAlerts } from '../engine/javaInsights';
 import { fmt } from '../engine/sched';
 import type {
   ClockState,
+  JplData,
   MapBasemapId,
   RegionPreset,
   RunningTrain,
@@ -55,9 +58,13 @@ interface HomePanelProps {
   recentStations: string[];
   kaiLoaded: boolean;
   freightLoaded: boolean;
+  jplData: JplData | null;
+  jplLoading: boolean;
   onSelectFilter: (id: SystemFilterId) => void;
   onSelectBasemap: (id: MapBasemapId) => void;
   onLocateMe: () => void;
+  onEnableJpl: () => void;
+  onOpenJpl: (index: number) => void;
   onOpenTrain: (id: string, date: string) => void;
   onOpenTrain3D: (id: string, date: string) => void;
   onOpenStation: (id: string) => void;
@@ -91,9 +98,13 @@ export const HomePanel = memo(function HomePanel({
   recentStations,
   kaiLoaded,
   freightLoaded,
+  jplData,
+  jplLoading,
   onSelectFilter,
   onSelectBasemap,
   onLocateMe,
+  onEnableJpl,
+  onOpenJpl,
   onOpenTrain,
   onOpenTrain3D,
   onOpenStation,
@@ -121,6 +132,17 @@ export const HomePanel = memo(function HomePanel({
         limit: 8,
       }),
     [engine, running, anchorCoord[0], anchorCoord[1], nearbyCat],
+  );
+
+  const nearbyJpls = useMemo(
+    () =>
+      jplData
+        ? computeNearbyJplAlerts(engine, jplData, anchorCoord, clock, {
+            limit: 3,
+            maxRadiusMeters: 15_000,
+          })
+        : [],
+    [engine, jplData, anchorCoord[0], anchorCoord[1], clock.date, Math.floor(clock.sec / 30)],
   );
 
   const favStation = favoriteStationId ? engine.st.get(favoriteStationId) : null;
@@ -426,6 +448,95 @@ export const HomePanel = memo(function HomePanel({
               );
             })}
           </div>
+        )}
+      </section>
+
+      {/* Nearby Level Crossing (JPL) Live Alert Radar */}
+      <section className="p-4 flex flex-col gap-2.5" data-testid="nearby-jpl-radar">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" aria-hidden="true" />
+              <span className="truncate">Radar Perlintasan (JPL) Terdekat</span>
+            </h2>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+              Prediksi kereta melintas di perlintasan sebidang Jawa
+            </p>
+          </div>
+          {!jplData && (
+            <button
+              type="button"
+              onClick={onEnableJpl}
+              disabled={jplLoading}
+              data-testid="enable-jpl-radar-btn"
+              className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-amber-500 hover:bg-amber-600 text-white transition-colors whitespace-nowrap shrink-0 disabled:opacity-60"
+            >
+              {jplLoading ? 'Memuat…' : 'Aktifkan JPL'}
+            </button>
+          )}
+        </div>
+
+        {jplData ? (
+          nearbyJpls.length === 0 ? (
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Tidak ada perlintasan sebidang dalam radius 15 km dari titik peta saat ini.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {nearbyJpls.map((al) => {
+                const pillCls =
+                  al.severity === 'imminent'
+                    ? 'bg-red-600 text-white'
+                    : al.severity === 'approaching'
+                      ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300'
+                      : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300';
+                const statusTxt =
+                  al.severity === 'imminent'
+                    ? 'Palang segera tutup'
+                    : al.severity === 'approaching'
+                      ? 'Kereta mendekat'
+                      : 'Aman sementara';
+                const nextInfo = al.nextPass
+                  ? trainDisplayInfo(al.nextPass.trip, al.nextPass.line)
+                  : null;
+                return (
+                  <button
+                    key={al.index}
+                    type="button"
+                    onClick={() => onOpenJpl(al.index)}
+                    className={`w-full p-2.5 rounded-xl border text-left transition-colors ${
+                      al.severity === 'imminent'
+                        ? 'border-red-300 dark:border-red-900/70 bg-red-50/70 dark:bg-red-950/25 hover:bg-red-50'
+                        : 'border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                        {al.item.road || (al.item.ref ? `JPL ${al.item.ref}` : `Petak ${al.item.a}–${al.item.b}`)}
+                      </span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${pillCls}`}>
+                        {statusTxt}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      <span className="truncate">
+                        {al.nextPass && nextInfo
+                          ? `${nextInfo.name} · ${formatWait(al.nextPass.waitSec)}`
+                          : 'Belum ada KA dalam 30 mnt'}
+                      </span>
+                      <span className="font-mono tabular-nums shrink-0 font-semibold text-slate-600 dark:text-slate-300">
+                        {formatDistanceKm(al.distanceMeters)}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )
+        ) : (
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            Aktifkan lapisan 4.700+ JPL Jawa untuk memantau peringatan palang perlintasan terdekat secara langsung.
+          </p>
         )}
       </section>
 

@@ -1,6 +1,7 @@
 import * as maplibregl from 'maplibre-gl';
 import * as THREE from 'three';
 import type { Car3DPose, Train3DPose } from './eta';
+import { getDaylightLighting } from './javaInsights';
 
 interface LiveryVisual {
   body: string;
@@ -711,7 +712,7 @@ function buildLocomotiveGroup(
   cabAc.position.set(0, baseY + hoodH + 0.4, L * 0.27);
   g.add(cabAc);
 
-  // 6. Glowing dual headlights + upper center beam
+  // 6. Glowing dual headlights + upper center beam + volumetric headlight cone
   for (const sx of [-0.75, 0.75]) {
     const hl = new THREE.Mesh(getBoxGeo(pool, 0.32, 0.24, 0.12), headlightMat);
     hl.position.set(sx, baseY + 0.82, L * 0.495);
@@ -720,6 +721,20 @@ function buildLocomotiveGroup(
   const topBeam = new THREE.Mesh(getBoxGeo(pool, 0.42, 0.2, 0.12), headlightMat);
   topBeam.position.set(0, baseY + hoodH - 0.14, L * 0.42);
   g.add(topBeam);
+
+  let beamGeo = pool.unitGeoCache.get('headlight_beam_geo');
+  if (!beamGeo) {
+    beamGeo = new THREE.CylinderGeometry(0.16, 2.4, 20, 12, 1, true);
+    beamGeo.rotateX(Math.PI / 2);
+    pool.unitGeoCache.set('headlight_beam_geo', beamGeo);
+    pool.geometries.push(beamGeo);
+  }
+  const beamMat = pool.matCache.get('headlight_beam_mat');
+  if (beamMat) {
+    const beam = new THREE.Mesh(beamGeo, beamMat);
+    beam.position.set(0, baseY + 0.35, L * 0.5 + 10.0);
+    g.add(beam);
+  }
 
   return g;
 }
@@ -730,6 +745,7 @@ function buildPassengerCarGroup(
   car: Car3DPose,
   vis: LiveryVisual,
   maxAnisotropy: number,
+  specialTag?: 'panoramic' | 'suite' | 'ssng' | null,
 ): THREE.Group {
   const g = new THREE.Group();
   const isWhoosh = car.liv === 'whoosh';
@@ -790,16 +806,68 @@ function buildPassengerCarGroup(
   shell.position.set(0, baseY + bodyH * 0.5, bodyZ);
   g.add(shell);
 
-  // Crowned rounded roof cap
+  // Crowned rounded roof cap (with Panoramic skylight or Suite Class gold trim)
   const roofCap = new THREE.Mesh(getBoxGeo(pool, W * 0.86, 0.26, bodyLen * 0.98), roofMat);
   roofCap.position.set(0, baseY + bodyH + 0.13, bodyZ);
   g.add(roofCap);
 
-  // Twin rooftop AC condenser pods (characteristic silhouette of KAI & KRL coaches!)
+  if (specialTag === 'panoramic' && !isGenerator) {
+    const skylightMat = getStdMat(pool, 'panoramic_skylight', {
+      color: '#0EA5E9',
+      emissive: '#0369A1',
+      emissiveIntensity: 0.45,
+      roughness: 0.12,
+      metalness: 0.7,
+    });
+    const skylight = new THREE.Mesh(getBoxGeo(pool, W * 0.68, 0.08, bodyLen * 0.72), skylightMat);
+    skylight.position.set(0, baseY + bodyH + 0.28, bodyZ);
+    g.add(skylight);
+  } else if (specialTag === 'suite' && !isGenerator) {
+    const goldMat = getStdMat(pool, 'suite_gold', {
+      color: '#F59E0B',
+      emissive: '#92400E',
+      emissiveIntensity: 0.25,
+      roughness: 0.25,
+      metalness: 0.65,
+    });
+    const goldCrown = new THREE.Mesh(getBoxGeo(pool, W * 0.9, 0.09, bodyLen * 0.92), goldMat);
+    goldCrown.position.set(0, baseY + bodyH + 0.27, bodyZ);
+    g.add(goldCrown);
+  }
+
+  // Warm glowing cabin window strip on both flanks (illuminates automatically at dusk & night)
+  const nightWinMat = pool.matCache.get('night_window_glow');
+  if (nightWinMat && !isGenerator) {
+    const glowStripGeo = getBoxGeo(pool, 0.04, 0.62, bodyLen * 0.78);
+    for (const sx of [-W * 0.5 - 0.015, W * 0.5 + 0.015]) {
+      const strip = new THREE.Mesh(glowStripGeo, nightWinMat);
+      strip.position.set(sx, baseY + bodyH * 0.6, bodyZ);
+      g.add(strip);
+    }
+  }
+
+  // Twin rooftop AC condenser pods
   for (const zOff of [-bodyLen * 0.26, bodyLen * 0.26]) {
     const ac = new THREE.Mesh(getBoxGeo(pool, W * 0.58, 0.24, Math.min(2.8, bodyLen * 0.18)), acMat);
     ac.position.set(0, baseY + bodyH + 0.34, bodyZ + zOff);
     g.add(ac);
+  }
+
+  // Front EMU / Whoosh volumetric headlight cone
+  if (car.cab === 'f') {
+    let beamGeo = pool.unitGeoCache.get('headlight_beam_geo');
+    if (!beamGeo) {
+      beamGeo = new THREE.CylinderGeometry(0.16, 2.4, 20, 12, 1, true);
+      beamGeo.rotateX(Math.PI / 2);
+      pool.unitGeoCache.set('headlight_beam_geo', beamGeo);
+      pool.geometries.push(beamGeo);
+    }
+    const beamMat = pool.matCache.get('headlight_beam_mat');
+    if (beamMat) {
+      const beam = new THREE.Mesh(beamGeo, beamMat);
+      beam.position.set(0, baseY + 0.3, L * 0.5 + 10.0);
+      g.add(beam);
+    }
   }
 
   // Pantograph frame on alternate electric cars
@@ -956,13 +1024,14 @@ function buildCarGroup(
   pool: ResourcePool,
   car: Car3DPose,
   maxAnisotropy: number,
+  specialTag?: 'panoramic' | 'suite' | 'ssng' | null,
 ): THREE.Group {
   const vis = getVisual(car.liv);
   if (car.loco) return buildLocomotiveGroup(pool, car, vis, maxAnisotropy);
   if (vis.tank || vis.container || vis.flat || vis.hopper || vis.box) {
     return buildFreightCarGroup(pool, car, vis);
   }
-  return buildPassengerCarGroup(pool, car, vis, maxAnisotropy);
+  return buildPassengerCarGroup(pool, car, vis, maxAnisotropy, specialTag);
 }
 
 // Pre-allocated math helpers outside render loop (zero per-frame GC)
@@ -981,12 +1050,16 @@ const _railForward = new THREE.Vector3();
 export function createTrain3DLayer(
   getPoses: () => Train3DPose[],
   getTheme: () => 'light' | 'dark',
+  getClockSec?: () => number,
 ): maplibregl.CustomLayerInterface {
   let renderer: THREE.WebGLRenderer | null = null;
   let scene: THREE.Scene | null = null;
   let camera: THREE.Camera | null = null;
+  let ambientLight: THREE.AmbientLight | null = null;
   let keyLight: THREE.DirectionalLight | null = null;
   let hemiLight: THREE.HemisphereLight | null = null;
+  let headlightBeamMat: THREE.MeshBasicMaterial | null = null;
+  let nightWindowMat: THREE.MeshBasicMaterial | null = null;
   let trainsRoot: THREE.Group | null = null;
   let railsRoot: THREE.Group | null = null;
   let pool: ResourcePool | null = null;
@@ -1019,9 +1092,27 @@ export function createTrain3DLayer(
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       maxAnisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy() || 4);
 
-      // Bright daylight studio-outdoor rig so white/orange/blue/red liveries read vividly from EVERY camera angle
-      const ambient = new THREE.AmbientLight('#FFFFFF', 0.95);
-      scene.add(ambient);
+      headlightBeamMat = new THREE.MeshBasicMaterial({
+        color: '#FEF08A',
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      pool.matCache.set('headlight_beam_mat', headlightBeamMat);
+      pool.materials.push(headlightBeamMat);
+
+      nightWindowMat = new THREE.MeshBasicMaterial({
+        color: '#FDE68A',
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      });
+      pool.matCache.set('night_window_glow', nightWindowMat);
+      pool.materials.push(nightWindowMat);
+
+      ambientLight = new THREE.AmbientLight('#FFFFFF', 0.95);
+      scene.add(ambientLight);
 
       hemiLight = new THREE.HemisphereLight('#FFFFFF', '#94A3B8', 1.15);
       scene.add(hemiLight);
@@ -1030,7 +1121,7 @@ export function createTrain3DLayer(
       keyLight.position.set(60, 130, 80);
       scene.add(keyLight);
 
-      const fillLight = new THREE.DirectionalLight('#EEF6FF', 0.85);
+      const fillLight = new THREE.DirectionalLight('#EEF6FF', 0.55);
       fillLight.position.set(-70, 95, -65);
       scene.add(fillLight);
 
@@ -1091,22 +1182,50 @@ export function createTrain3DLayer(
       const meterScale = origin.meterInMercatorCoordinateUnits();
       if (!Number.isFinite(meterScale) || meterScale <= 0) return;
 
-      // Adapt ambient brightness subtly for dark vs light basemap
+      // Adapt atmospheric lighting dynamically to WIB time-of-day (Fajar / Siang / Senja / Malam)
       const isDark = getTheme() === 'dark';
-      if (hemiLight) hemiLight.intensity = isDark ? 0.95 : 1.15;
-      if (keyLight) keyLight.intensity = isDark ? 1.0 : 1.2;
+      const daylight = getDaylightLighting(getClockSec ? getClockSec() : 43200);
+      if (ambientLight) {
+        ambientLight.color.set(daylight.ambientColor);
+        ambientLight.intensity = daylight.ambientIntensity * (isDark ? 0.92 : 1.0);
+      }
+      if (hemiLight) {
+        hemiLight.color.set(daylight.hemiSkyColor);
+        hemiLight.groundColor.set(daylight.hemiGroundColor);
+        hemiLight.intensity = daylight.hemiIntensity * (isDark ? 0.95 : 1.12);
+      }
+      if (keyLight) {
+        keyLight.color.set(daylight.keyColor);
+        keyLight.intensity = daylight.keyIntensity;
+        keyLight.position.set(
+          daylight.sunPos[0] * 75,
+          Math.max(40, daylight.sunPos[2] * 95),
+          daylight.sunPos[1] * 80,
+        );
+      }
+      if (headlightBeamMat) {
+        const beamOp = Math.max(daylight.headlightBeamOpacity, isDark ? 0.24 : 0);
+        headlightBeamMat.opacity = beamOp * 0.48;
+        headlightBeamMat.visible = beamOp > 0.02;
+      }
+      if (nightWindowMat) {
+        const winOp = Math.max(daylight.windowGlow, isDark ? 0.28 : 0);
+        nightWindowMat.opacity = winOp * 0.52;
+        nightWindowMat.visible = winOp > 0.02;
+      }
 
       // Sync active train meshes
       const activeKeys = new Set<string>();
       for (const tr of poses) {
-        const cacheKey = `${tr.id}|${tr.stockKey}|${tr.cars.length}`;
+        const cacheKey = `${tr.id}|${tr.stockKey}|${tr.cars.length}|${tr.specialCar || ''}`;
         activeKeys.add(cacheKey);
 
         let carGroups = trainMeshCache.get(cacheKey);
         if (!carGroups) {
-          carGroups = tr.cars.map((car) => {
-            const grp = buildCarGroup(pool!, car, maxAnisotropy);
-            // Subtle rail-twin cross-section scale so windows, livery & bogies read heroically at zoom 18
+          carGroups = tr.cars.map((car, idx) => {
+            const isLastCoach = idx === tr.cars.length - 1;
+            const carSpecial = isLastCoach ? tr.specialCar : null;
+            const grp = buildCarGroup(pool!, car, maxAnisotropy, carSpecial);
             grp.scale.set(1.22, 1.26, 1.0);
             trainsRoot!.add(grp);
             return grp;

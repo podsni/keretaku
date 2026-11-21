@@ -3,6 +3,7 @@ import { ArrowUpDown, Footprints, MapPin, Play, TrainFront } from 'lucide-react'
 import type { Engine } from '../engine/sched';
 import { dur, fmt } from '../engine/sched';
 import { trainDisplayInfo } from '../engine/constants';
+import { tagJourneyHighlights } from '../engine/javaInsights';
 import type { ClockState, Journey, Station } from '../engine/types';
 import { ShareButton } from './ShareButton';
 
@@ -168,6 +169,10 @@ export function RoutePlannerPanel({
     () => engine.allStations().sort((a, b) => a.name.localeCompare(b.name)),
     [engine],
   );
+  const journeyEstimates = useMemo(
+    () => tagJourneyHighlights(engine, journeys),
+    [engine, journeys],
+  );
 
   const parsedTimeSec = () => {
     const [hh, mm] = timeStr.split(':').map(Number);
@@ -320,6 +325,7 @@ export function RoutePlannerPanel({
 
           {journeys.map((j, idx) => {
             const selected = idx === activeJourneyIndex;
+            const est = journeyEstimates[idx];
             return (
               <div
                 key={idx}
@@ -343,9 +349,35 @@ export function RoutePlannerPanel({
                     </div>
                   </div>
 
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {j.transfers === 0 ? 'Langsung tanpa pindah kereta' : `${j.transfers} kali pindah kereta`}
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {j.transfers === 0 ? 'Langsung tanpa pindah kereta' : `${j.transfers} kali pindah kereta`}
+                    </div>
+                    {est && est.minIdr > 0 && (
+                      <span className="font-mono tabular-nums text-[11px] font-semibold text-slate-700 dark:text-slate-200">
+                        Est. {est.fareText}
+                      </span>
+                    )}
                   </div>
+
+                  {est && est.badges.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {est.badges.map((b) => (
+                        <span
+                          key={b}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            b === 'Tercepat'
+                              ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/60'
+                              : b === 'Hemat'
+                                ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/60'
+                                : 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800/60'
+                          }`}
+                        >
+                          {b}
+                        </span>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Legs breakdown */}
                   <div className="flex flex-col gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80">
