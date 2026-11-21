@@ -331,6 +331,6 @@ Perbaikan, laporan galat, dan usulan fitur sangat diterima, selama data yang dit
 
 Repositori ini belum menyertakan berkas `LICENSE`.
 
-Jendela Tentang di aplikasi menyebut bahwa Sepur Live berbasis proyek sumber terbuka **sepur-live** (MIT © 2026 Hendra Bangun Dwi R).
+Jendela Tentang di aplikasi menyebut bahwa Sepur Live berbasis proyek sumber terbuka **sepur-live** (MIT © 2026 podsni).
 
 Data peta © kontributor OpenStreetMap (ODbL 1.0). Foto dari Wikimedia Commons sesuai lisensi masing-masing berkas. Rincian lengkap ada di [`ATTRIBUTION.md`](./ATTRIBUTION.md).
