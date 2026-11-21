@@ -1,0 +1,9 @@
+.aistudio
+.playwright-cli
+workspace
+public/assets/aistudio
+node_modules
+dist
+.env
+.env.local
+*.log

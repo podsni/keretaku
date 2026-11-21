@@ -175,6 +175,53 @@ npm run lint
 
 ---
 
+## Deploy ke Vercel
+
+Proyek ini sudah dikonfigurasi siap *deploy* sebagai aplikasi statis Vite di **Vercel** melalui `vercel.json` dan `.vercelignore` — **tanpa perlu backend khusus maupun API key / Environment Variable wajib** (data jadwal bersifat statis dan API cuaca Open-Meteo berjalan langsung tanpa kunci API).
+
+### Opsi 1: Deploy via GitHub & Dashboard Vercel (Direkomendasikan)
+
+1. **Unggah proyek ke repositori GitHub** (GitLab / Bitbucket juga didukung).
+2. Buka [vercel.com/new](https://vercel.com/new), lalu pilih **Import Git Repository** dan pilih repositori proyek ini.
+3. Vercel akan otomatis membaca `vercel.json` dengan konfigurasi berikut:
+   - **Framework Preset**: `Vite`
+   - **Install Command**: `npm install`
+   - **Build Command**: `npm run build`
+   - **Output Directory**: `dist`
+   - **Node.js Version**: `20.x` atau lebih baru (`engines.node >= 20.0.0`)
+4. Tidak ada *Environment Variable* wajib yang perlu diisi — langsung klik **Deploy**.
+5. Setelah selesai, aplikasi langsung aktif di URL `https://<nama-proyek>.vercel.app` dengan HTTPS penuh (dibutuhkan browser agar fitur **Live GPS / Lokasiku** berjalan).
+
+### Opsi 2: Deploy via Vercel CLI
+
+1. **Pasang Vercel CLI secara global**
+   ```bash
+   npm install -g vercel
+   ```
+
+2. **Masuk ke akun Vercel**
+   ```bash
+   vercel login
+   ```
+
+3. **Deploy pratinjau (*Preview*)**
+   ```bash
+   vercel
+   ```
+
+4. **Deploy ke produksi (*Production*)**
+   ```bash
+   vercel --prod
+   ```
+
+### Apa yang Diatur di `vercel.json`?
+- **SPA Fallback Rewrite**: mengarahkan rute aplikasi ke `/index.html` tanpa mengganggu berkas statis (`/assets/*`, `/data/*`, `/img/*`, `/icon.svg`, `/maplibre-gl-worker.mjs`).
+- **MIME & Cache Web Worker MapLibre**: memastikan `/maplibre-gl-worker.mjs` disajikan sebagai `application/javascript; charset=utf-8` agar peta vektor & 3D berjalan lancar.
+- **Caching Edge CDN**: *immutable caching* untuk bundel aset Vite (`/assets/*`) dan *stale-while-revalidate* untuk dataset JSON GAPEKA (`/data/*`) serta ilustrasi armada (`/img/*`).
+- **Header Keamanan & Geolokasi**: menyertakan `Permissions-Policy: geolocation=(self)` agar fitur deteksi lokasi & Live GPS tetap diizinkan di domain produksi.
+
+---
+
 ## Format Tautan *Deep-Link*
 
 Sepur Live menyinkronkan tampilan aktif ke hash URL sehingga mudah dibagikan:
